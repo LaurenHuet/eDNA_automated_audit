@@ -1,56 +1,136 @@
-# OceanOmics eDNA Pipeline Output Validator
+# SOP OcOm_B218 — eDNA Pipeline Output Validation
 
-**SOP:** OcOm_B218  
+**Purpose:** Audit eDNA metabarcoding pipeline outputs before sharing data with collaborators  
 **Script:** `validate_edna_output.py`  
-**Helper:** `check_phyloseq.R`
+**Helper:** `check_phyloseq.R`  
+**Platform:** Setonix HPC, Pawsey Supercomputing Centre
 
 ---
 
-## Overview
+## 1. Prerequisites
 
-Audits eDNA metabarcoding pipeline outputs for a project directory before data is shared with collaborators. Runs across all assay subdirectories (e.g. `16SFish`, `MiFish`) and produces a timestamped log with PASS / WARN / FAIL results and a final summary.
+### 1.1 Software
 
----
+The following must be available in your environment:
 
-## Usage
+| Tool | Notes |
+|------|-------|
+| `uv` | Inline script runner — handles Python dependencies automatically |
+| `singularity` | Required for phyloseq `.rds` checks (loaded at Setonix login) |
+| Python ≥ 3.11 | Managed by `uv` |
 
-```bash
-# Check shared/collaborator directories only (default)
-uv run --script validate_edna_output.py <project_dir>
+### 1.2 Script files
 
-# Check all pipeline directories
-uv run --script validate_edna_output.py <project_dir> --all
+Both files must be in the same directory:
 
-# Specify log path
-uv run --script validate_edna_output.py <project_dir> --log /path/to/output.log
-
-# Specify singularity images directory (overrides $SING2)
-uv run --script validate_edna_output.py <project_dir> --sing2 /path/to/sifs
+```
+validate_edna_output.py
+check_phyloseq.R
 ```
 
-The log is written to `<project_dir>/validation_<timestamp>.log` by default.
+### 1.3 Environment variables
+
+Add the following to your `~/.bashrc` on Setonix. Both variables must be set for all checks to run correctly.
+
+```bash
+# Redirect uv's package cache to scratch — home directory quota is too small
+export UV_CACHE_DIR=/scratch/pawsey0964/$USER/.cache/uv
+
+# Path to shared Singularity images — required for phyloseq .rds checks
+# This is already set at Setonix login; add the line below only if it is missing
+export SING=/software/projects/pawsey0964/singularity
+```
+
+Apply changes immediately:
+
+```bash
+source ~/.bashrc
+```
+
+> **Note:** If `UV_CACHE_DIR` is not set, `uv` will write to `~/.cache/uv` and the run will fail when the home directory quota is exceeded.  
+> **Note:** If `SING` is not set, phyloseq `.rds` checks are skipped with a WARN.
 
 ---
 
-## Check Modes
+## 2. Running the Validator
 
-| Flag | What is checked |
+### 2.1 Basic usage
+
+```bash
+# Check shared/collaborator directories only (recommended before sharing)
+uv run --script validate_edna_output.py <project_dir>
+
+# Check all pipeline directories including intermediate steps
+uv run --script validate_edna_output.py <project_dir> --all
+```
+
+**Example:**
+
+```bash
+uv run --script validate_edna_output.py /scratch/pawsey0964/lhuet/OcOm_2516
+```
+
+### 2.2 Optional arguments
+
+```bash
+# Write log to a custom path instead of the default location
+uv run --script validate_edna_output.py <project_dir> --log /path/to/output.log
+
+# Override $SING to specify a different Singularity images directory
+uv run --script validate_edna_output.py <project_dir> --sing /path/to/sifs
+```
+
+### 2.3 Output
+
+The log is written to:
+
+```
+<project_dir>/validation_<project_id>_<timestamp>.log
+```
+
+The final line of the log gives an overall result:
+
+| Result | Meaning |
+|--------|---------|
+| `RESULT: ALL CHECKS PASSED — data is ready to share` | No issues found |
+| `RESULT: PASS WITH WARNINGS — review warnings before sharing` | Minor issues; review before sharing |
+| `RESULT: FAIL — data is NOT ready to share` | Critical issues must be resolved first |
+
+---
+
+## 3. Check Modes
+
+| Mode | What is checked |
 |------|----------------|
-| (default) | Shared/collaborator directories: `05-lca`, `06-aquamap`, `06-phyloseq`, `07-faire`, `07-multiqc`, `07-proportional_filter` |
+| Default | Shared/collaborator directories: `05-lca`, `06-aquamap`, `06-phyloseq`, `07-faire`, `07-multiqc`, `07-proportional_filter` |
 | `--all` | All of the above **plus** early pipeline directories: `01-cutadapt`, `01-fastqc`, `01-seqkit_stats`, `02-dada2`, `03-lulu`, `04-blast`, `04-ocomnbc`, `07-pipeline_info` |
 
 ---
 
-## Checks Performed
+## 4. Result Levels
 
-### All Modes (Shared / Collaborator Directories)
+| Level | Meaning |
+|-------|---------|
+| `PASS` | Check passed |
+| `WARN` | Potential issue; review before sharing but does not block |
+| `FAIL` | Critical issue; data must NOT be shared until resolved |
+
+---
+
+## 5. Checks Performed
+
+Assay directories are auto-discovered: any subdirectory of the project root containing `05-lca`, `06-phyloseq`, or `07-faire` is treated as an assay (e.g. `16SFish`, `MiFishU`, `COILeray`).
+
+---
+
+### Default Mode — Shared / Collaborator Directories
 
 #### `05-lca` — LCA taxonomy files
 
 - All expected TSV files are present and non-empty
 - `_taxa_final.tsv` files: `seq_id` column is present and values are unique (no duplicate ASVs)
 - `_lca_with_fishbase_output.tsv` files: all required taxonomy columns are present (`domain`, `phylum`, `class`, `order`, `family`, `genus`, `species`, `otu`, `querycoverage`, `%id`)
-- Unexpected files in the directory are flagged as WARN
+- Unexpected files flagged as WARN
 
 #### `06-aquamap` — AquaMaps species range CSVs
 
@@ -73,11 +153,9 @@ The log is written to `<project_dir>/validation_<timestamp>.log` by default.
   - Samples in FAIRe but absent from phyloseq are classified by cause:
     - Non-ITC control samples (EB, WC, FC, NTC): PASS — controls may have 0 reads
     - ITC positive controls: WARN — ITC should always have reads; absence is concerning
-    - Real samples not found in the pipeline samplesheet: PASS — excluded/discarded before pipeline ran
-    - Real samples in the pipeline samplesheet with `discarded=False`: WARN — undiscarded sample missing from phyloseq, check read counts
-- Column name cross-check (`sam_data` vs. FAIRe `sampleMetadata`):
-  - Internal pipeline columns (`discarded`, `sample_type`, `use_for_filter`) are excluded from comparison
-  - Mismatches flagged as WARN
+    - Samples not present in the pipeline samplesheet: PASS — excluded/discarded before pipeline ran
+    - Samples in the pipeline samplesheet with `discarded=False`: WARN — undiscarded sample missing from phyloseq; check read counts
+- Column name cross-check (`sam_data` vs. FAIRe `sampleMetadata`): mismatches flagged as WARN; internal pipeline columns (`discarded`, `sample_type`, `use_for_filter`) are excluded
 - Unexpected files flagged as WARN
 
 #### `07-faire` — FAIRe metadata xlsx files
@@ -89,7 +167,7 @@ The log is written to `<project_dir>/validation_<timestamp>.log` by default.
 - Each tab is non-empty
 - **Mandatory column completeness** — checked across `sampleMetadata`, `experimentRunMetadata`, `taxaRaw`, and `taxaFinal`:
   - The requirement level row (`# requirement_level_code`) is parsed to identify mandatory (`M`) columns
-  - Conditional mandatory rules are read directly from the cell comments, e.g.:
+  - Conditional mandatory rules are read from the cell comments in the xlsx template, e.g.:
     - `neg_cont_type` is only mandatory when `samp_category = negative control`
     - `pos_cont_type` is only mandatory when `samp_category = positive control`
     - `decimalLatitude`, `decimalLongitude`, `env_broad_scale`, `env_local_scale`, `env_medium` are mandatory unless `samp_category` is a control type
@@ -114,7 +192,7 @@ The log is written to `<project_dir>/validation_<timestamp>.log` by default.
 
 ---
 
-### `--all` Mode Only (Full Pipeline Directories)
+### `--all` Mode — Full Pipeline Directories
 
 #### `01-cutadapt` — Primer trimming
 
@@ -134,6 +212,7 @@ The log is written to `<project_dir>/validation_<timestamp>.log` by default.
 #### `02-dada2` — DADA2 ASV calling
 
 - Expected ASV FASTA, ASV table (TSV/CSV), LCA input TSV, and `.rds` sequence table are present and non-empty
+- `<project>_<assay>_asv_track_reads.txt` is present and non-empty — checked at the top level of `02-dada2/` first, then inside `plots/` (location varies by pipeline version)
 - `plots/` subdirectory is present and non-empty
 
 #### `03-lulu` — LULU curation
@@ -157,38 +236,7 @@ The log is written to `<project_dir>/validation_<timestamp>.log` by default.
 
 ---
 
-## Result Levels
+## 6. Technical Notes
 
-| Level | Meaning |
-|-------|---------|
-| `PASS` | Check passed |
-| `WARN` | Potential issue; review before sharing but does not block |
-| `FAIL` | Critical issue; data should NOT be shared until resolved |
-
-**Final result:**
-- Any FAIL → `RESULT: FAIL — data is NOT ready to share`
-- WARN only → `RESULT: PASS WITH WARNINGS — review warnings before sharing`
-- All PASS → `RESULT: ALL CHECKS PASSED — data is ready to share`
-
----
-
-## Dependencies
-
-| Dependency | Purpose |
-|-----------|---------|
-| Python ≥ 3.11 | Runtime |
-| `uv` | Inline script runner / dependency management |
-| `pandas` | TSV/CSV parsing |
-| `singularity` | Runs R checks in container |
-| `bioconductor-phyloseq:1.54.sif` | phyloseq .rds validation (`$SING2` must be set) |
-
-The R helper `check_phyloseq.R` must be in the same directory as `validate_edna_output.py`.
-
----
-
-## Notes
-
-- Assay directories are auto-discovered: any subdirectory of the project root containing `05-lca`, `06-phyloseq`, or `07-faire` is treated as an assay.
-- If `$SING2` is not set and `--sing2` is not provided, phyloseq `.rds` checks are skipped with a WARN.
-- The raw XML parser is used for all `.xlsx` reads to work around an openpyxl dimension bug present in FAIRe-format files. Cell comments in the xlsx are also parsed to extract conditional mandatory field rules.
-- The valid samplesheet (`07-pipeline_info/<project>_<assay>_samplesheet.valid.csv`) contains only non-discarded samples that entered the pipeline. Sample names in this file carry a `_T<N>` run-index suffix which is stripped before matching against FAIRe/phyloseq names.
+- The raw XML parser is used for all `.xlsx` reads to work around an openpyxl dimension bug present in FAIRe-format files. Cell comments in the xlsx are also parsed at runtime to extract conditional mandatory field rules — no hardcoding of conditions in the script.
+- The valid samplesheet (`07-pipeline_info/<project>_<assay>_samplesheet.valid.csv`) contains only non-discarded samples that entered the pipeline. Sample names carry a `_T<N>` run-index suffix which is stripped before matching against FAIRe/phyloseq names.
