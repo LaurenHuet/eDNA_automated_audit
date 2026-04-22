@@ -11,13 +11,21 @@
 
 ### 1.1 Software
 
-The following must be available in your environment:
+`singularity` is loaded automatically at Setonix login. `uv` must be installed once per user — it is not a Setonix module.
+
+**Install `uv` (one-time, run on a login node):**
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+The installer places `uv` at `~/.local/bin/uv` and adds `~/.local/bin` to your `PATH` in `~/.bashrc`. Apply immediately with `source ~/.bashrc`.
 
 | Tool | Notes |
 |------|-------|
-| `uv` | Inline script runner — handles Python dependencies automatically |
-| `singularity` | Required for phyloseq `.rds` checks (loaded at Setonix login) |
-| Python ≥ 3.11 | Managed by `uv` |
+| `uv` | Inline script runner — handles Python dependencies automatically. Install as above. |
+| `singularity` | Required for phyloseq `.rds` checks — loaded at Setonix login |
+| Python ≥ 3.11 | Managed by `uv` — no separate install needed |
 
 ### 1.2 Script files
 
@@ -67,7 +75,7 @@ uv run --script validate_edna_output.py <project_dir> --all
 **Example:**
 
 ```bash
-uv run --script validate_edna_output.py /scratch/pawsey0964/lhuet/OcOm_2516
+uv run --script validate_edna_output.py <project_dir>
 ```
 
 ### 2.2 Optional arguments
