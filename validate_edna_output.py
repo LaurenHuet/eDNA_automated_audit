@@ -8,12 +8,12 @@ OceanOmics eDNA Pipeline Output Validator
 SOP: OcOm_B218
 
 Usage:
-    validate_edna_output.py <project_dir> [--all] [--log LOG] [--sing2 PATH]
+    validate_edna_output.py <project_dir> [--all] [--log LOG] [--sing PATH]
 
 Flags:
     --all       Check all pipeline directories (default: shared dirs only)
     --log       Log file path (default: <project_dir>/validation_<timestamp>.log)
-    --sing2     Path to singularity images dir (default: $SING2 env var)
+    --sing      Path to singularity images dir (default: $SING env var)
 """
 
 import argparse
@@ -454,7 +454,7 @@ def _read_samplesheet_discarded(path: Path) -> dict[str, bool]:
 PHYLOSEQ_TAXA_COLS = {"domain", "phylum", "class", "order", "family", "genus", "species", "lca"}
 
 def check_phyloseq_dir(ps_dir: Path, p: str, a: str, faire_dir: Path,
-                        results: Results, sing2: str):
+                        results: Results, sing: str):
     d = "06-phyloseq"
     exp = shared_expected(p, a)["06-phyloseq"]
 
@@ -482,12 +482,12 @@ def check_phyloseq_dir(ps_dir: Path, p: str, a: str, faire_dir: Path,
                 results.add(a, d, WARN, f"Could not parse {fname}: {e}")
 
     # R-based checks for each .rds file
-    if not sing2:
-        results.add(a, d, WARN, "Skipping phyloseq .rds checks — SING2 not set")
+    if not sing:
+        results.add(a, d, WARN, "Skipping phyloseq .rds checks — SING not set")
     elif not R_SCRIPT.exists():
         results.add(a, d, WARN, f"Skipping phyloseq .rds checks — {R_SCRIPT} not found")
     else:
-        sif = os.path.join(sing2, PHYLOSEQ_SIF)
+        sif = os.path.join(sing, PHYLOSEQ_SIF)
         if not os.path.exists(sif):
             results.add(a, d, WARN, f"Skipping phyloseq .rds checks — container not found: {sif}")
         else:
@@ -1171,7 +1171,7 @@ def check_pipeline_info_dir(pi_dir: Path, p: str, a: str, results: Results):
 # ── assay validator ────────────────────────────────────────────────────────────
 
 def validate_assay(assay_dir: Path, project_id: str, check_all: bool,
-                   results: Results, sing2: str, log: logging.Logger):
+                   results: Results, sing: str, log: logging.Logger):
     a = assay_dir.name
     log.info(f"{'='*60}")
     log.info(f"Validating assay: {a}")
@@ -1183,7 +1183,7 @@ def validate_assay(assay_dir: Path, project_id: str, check_all: bool,
     check_lca_dir(assay_dir / "05-lca", p, a, results)
     check_aquamap_dir(assay_dir / "06-aquamap", p, a, results)
     check_phyloseq_dir(assay_dir / "06-phyloseq", p, a,
-                       assay_dir / "07-faire", results, sing2)
+                       assay_dir / "07-faire", results, sing)
     check_faire_dir(assay_dir / "07-faire", p, a, results)
     check_multiqc_dir(assay_dir / "07-multiqc", p, a, results)
     check_proportional_filter_dir(assay_dir / "07-proportional_filter", p, a, results)
@@ -1225,9 +1225,9 @@ def main():
         help="Log file path (default: <project_dir>/validation_<timestamp>.log)"
     )
     parser.add_argument(
-        "--sing2", type=str,
-        default=os.environ.get("SING2", ""),
-        help="Path to singularity images directory (default: $SING2)"
+        "--sing", type=str,
+        default=os.environ.get("SING", ""),
+        help="Path to singularity images directory (default: $SING)"
     )
     args = parser.parse_args()
 
@@ -1244,7 +1244,7 @@ def main():
     log.info("OceanOmics eDNA Output Validator  |  SOP OcOm_B218")
     log.info(f"Project  : {project_id}")
     log.info(f"Mode     : {'all directories' if args.check_all else 'shared directories only'}")
-    log.info(f"SING2    : {args.sing2 or '(not set — phyloseq .rds checks will be skipped)'}")
+    log.info(f"SING     : {args.sing or '(not set — phyloseq .rds checks will be skipped)'}")
     log.info(f"Log file : {log_path}")
 
     # Discover assay directories
@@ -1270,7 +1270,7 @@ def main():
     results = Results(log)
 
     for assay_dir in assay_dirs:
-        validate_assay(assay_dir, project_id, args.check_all, results, args.sing2, log)
+        validate_assay(assay_dir, project_id, args.check_all, results, args.sing, log)
 
     # ── final summary ──────────────────────────────────────────────────────────
     fails, warns, passes = results.counts()
